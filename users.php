@@ -26,43 +26,33 @@ $role = $user['role'];
 
 // فیلتر و جستجو
 $search = isset($_GET['search']) ? $_GET['search'] : '';
+$role_filter = isset($_GET['role_filter']) ? $_GET['role_filter'] : '';
 $status_filter = isset($_GET['status_filter']) ? $_GET['status_filter'] : '';
 
-$query = "SELECT hotel_id, hotel_name, hotel_owner, hotel_phone, hotel_star, hotel_province, hotel_city, hotel_publicrelations, hotel_proposed 
-          FROM Hotels 
-          WHERE (hotel_name LIKE :search OR hotel_id LIKE :search)";
+$query = "SELECT user_id, username, email, `F-Name`, `L-Name`, Phone, balance, verification_status, role, video_path 
+          FROM Users 
+          WHERE (username LIKE :search OR user_id LIKE :search OR email LIKE :search)";
 $params = ['search' => "%$search%"];
 
+if ($role_filter) {
+    $query .= " AND role = :role";
+    $params['role'] = $role_filter;
+}
 if ($status_filter) {
-    $query .= " AND hotel_proposed = :status";
+    $query .= " AND verification_status = :status";
     $params['status'] = $status_filter;
 }
 
 $stmt = $db->prepare($query);
 $stmt->execute($params);
-$hotels = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// مدیریت درخواست AJAX برای تغییر وضعیت (فقط برای Moderator)
-if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role === 'Moderator') {
-    $hotel_id = $_POST['hotel_id'] ?? null;
-    $new_status = $_POST['hotel_proposed'] ?? null;
-
-    if ($hotel_id && in_array($new_status, ['Recommended', 'Not recommended'])) {
-        $stmt = $db->prepare("UPDATE Hotels SET hotel_proposed = :hotel_proposed WHERE hotel_id = :hotel_id");
-        $stmt->execute(['hotel_proposed' => $new_status, 'hotel_id' => $hotel_id]);
-        echo json_encode(['success' => true]);
-    } else {
-        echo json_encode(['success' => false, 'error' => 'ورودی نامعتبر']);
-    }
-    exit;
-}
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مدیریت هتل‌ها - آستور</title>
+    <title>مدیریت کاربران - آستور</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
@@ -147,12 +137,29 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role ===
             border-radius: 8px;
             padding: 0.5rem;
         }
-        .status-select {
-            background: #374151;
-            color: #e2e8f0;
-            border-radius: 8px;
-            padding: 0.25rem;
+        .popup {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .popup-content {
+            background: #1e293b;
+            padding: 1rem;
+            border-radius: 16px;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+        }
+        video {
+            max-width: 100%;
+            border-radius: 8px;
         }
         @media (min-width: 768px) {
             .sidebar {
@@ -233,9 +240,9 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role ===
             <div id="sidebar" class="sidebar w-64 p-6">
                 <ul class="space-y-6">
                     <li><a href="/site/admin/index.php" class="flex items-center text-gray-300 hover:text-white transition"><i class="fas fa-tachometer-alt mr-2"></i> داشبورد</a></li>
-                    <li><a href="/site/admin/users.php" class="flex items-center text-gray-300 hover:text-white transition"><i class="fas fa-users mr-2"></i> مدیریت کاربران</a></li>
+                    <li><a href="/site/admin/users.php" class="flex items-center text-white transition"><i class="fas fa-users mr-2"></i> مدیریت کاربران</a></li>
                     <li><a href="/site/admin/verification_requests.php" class="flex items-center text-gray-300 hover:text-white transition"><i class="fas fa-video mr-2"></i> درخواست‌های احراز هویت</a></li>
-                    <li><a href="/site/admin/hotels.php" class="flex items-center text-white transition"><i class="fas fa-hotel mr-2"></i> مدیریت هتل‌ها</a></li>
+                    <li><a href="/site/admin/hotels.php" class="flex items-center text-gray-300 hover:text-white transition"><i class="fas fa-hotel mr-2"></i> مدیریت هتل‌ها</a></li>
                     <li><a href="/site/admin/reservations.php" class="flex items-center text-gray-300 hover:text-white transition"><i class="fas fa-calendar-check mr-2"></i> مدیریت رزروها</a></li>
                 </ul>
                 <div class="mt-auto">
@@ -250,77 +257,98 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role ===
                     <div class="bg-green-500 text-white p-4 rounded-lg mb-4">
                         <?php echo htmlspecialchars(urldecode($_GET['message'])); ?>
                     </div>
+                <?php elseif (isset($_GET['error'])): ?>
+                    <div class="bg-red-500 text-white p-4 rounded-lg mb-4">
+                        <?php echo htmlspecialchars(urldecode($_GET['error'])); ?>
+                    </div>
                 <?php endif; ?>
                 <div class="card p-4 md:p-6">
                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-semibold text-white md:text-2xl"><i class="fas fa-hotel mr-2 text-blue-400 icon-pulse"></i> مدیریت هتل‌ها</h2>
+                        <h2 class="text-xl font-semibold text-white md:text-2xl"><i class="fas fa-users mr-2 text-blue-400 icon-pulse"></i> مدیریت کاربران</h2>
                         <?php if ($role === 'Moderator'): ?>
-                            <a href="/site/admin/add_hotel.php" class="btn-action text-green-300 hover:text-green-100"><i class="fas fa-plus mr-1"></i> افزودن هتل جدید</a>
+                            <a href="/site/admin/add_user.php" class="btn-action text-green-300 hover:text-green-100"><i class="fas fa-plus mr-1"></i> افزودن کاربر جدید</a>
                         <?php endif; ?>
                     </div>
                     
                     <!-- فرم جستجو و فیلتر -->
                     <form method="GET" class="mb-6 flex flex-col md:flex-row gap-4">
                         <div class="flex items-center flex-1">
-                            <input type="text" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="جستجو بر اساس نام یا شناسه..." class="w-full p-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            <input type="text" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="جستجو بر اساس نام کاربری، شناسه یا ایمیل..." class="w-full p-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400">
                             <button type="submit" class="mr-2 text-white hover:text-blue-300"><i class="fas fa-search text-lg"></i></button>
                         </div>
+                        <select name="role_filter" onchange="this.form.submit()" class="md:w-1/4">
+                            <option value="">همه نقش‌ها</option>
+                            <option value="admin" <?php if ($role_filter === 'admin') echo 'selected'; ?>>ادمین</option>
+                            <option value="hotelier" <?php if ($role_filter === 'hotelier') echo 'selected'; ?>>هتلی</option>
+                            <option value="doctor" <?php if ($role_filter === 'doctor') echo 'selected'; ?>>پزشک</option>
+                            <option value="user" <?php if ($role_filter === 'user') echo 'selected'; ?>>کاربر</option>
+                            <option value="Moderator" <?php if ($role_filter === 'Moderator') echo 'selected'; ?>>مدراتور</option>
+                        </select>
                         <select name="status_filter" onchange="this.form.submit()" class="md:w-1/4">
                             <option value="">همه وضعیت‌ها</option>
-                            <option value="Recommended" <?php if ($status_filter === 'Recommended') echo 'selected'; ?>>توصیه‌شده</option>
-                            <option value="Not recommended" <?php if ($status_filter === 'Not recommended') echo 'selected'; ?>>توصیه‌نشده</option>
+                            <option value="Confirm" <?php if ($status_filter === 'Confirm') echo 'selected'; ?>>تأیید شده</option>
+                            <option value="Rejected" <?php if ($status_filter === 'Rejected') echo 'selected'; ?>>رد شده</option>
+                            <option value="Not Verified" <?php if ($status_filter === 'Not Verified') echo 'selected'; ?>>در انتظار تأیید</option>
                         </select>
                     </form>
 
-                    <!-- جدول هتل‌ها -->
+                    <!-- جدول کاربران -->
                     <div class="overflow-x-auto">
                         <table>
                             <thead>
                                 <tr>
                                     <th>شناسه</th>
-                                    <th>نام هتل</th>
-                                    <th>مالک</th>
-                                    <th>شماره تماس</th>
-                                    <th>ستاره</th>
-                                    <th>استان</th>
-                                    <th>شهر</th>
-                                    <th>روابط عمومی</th>
-                                    <th>وضعیت</th>
+                                    <th>نام کاربری</th>
+                                    <th>نام</th>
+                                    <th>نام خانوادگی</th>
+                                    <th>ایمیل</th>
+                                    <th>تلفن</th>
+                                    <th>بالانس</th>
+                                    <th>وضعیت تأیید</th>
+                                    <th>ویدیو</th>
+                                    <th>نقش</th>
                                     <th>عملیات</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($hotels as $hotel): ?>
+                                <?php foreach ($users as $user): ?>
                                     <tr>
-                                        <td data-label="شناسه"><?php echo htmlspecialchars($hotel['hotel_id']); ?></td>
-                                        <td data-label="نام هتل"><?php echo htmlspecialchars($hotel['hotel_name']); ?></td>
-                                        <td data-label="مالک"><?php echo htmlspecialchars($hotel['hotel_owner'] ?? '-'); ?></td>
-                                        <td data-label="شماره تماس"><?php echo htmlspecialchars($hotel['hotel_phone'] ?? '-'); ?></td>
-                                        <td data-label="ستاره"><?php echo htmlspecialchars($hotel['hotel_star'] ?? '-'); ?></td>
-                                        <td data-label="استان"><?php echo htmlspecialchars($hotel['hotel_province']); ?></td>
-                                        <td data-label="شهر"><?php echo htmlspecialchars($hotel['hotel_city']); ?></td>
-                                        <td data-label="روابط عمومی"><?php echo htmlspecialchars($hotel['hotel_publicrelations'] ?? '-'); ?></td>
-                                        <td data-label="وضعیت">
-                                            <?php if ($role === 'Moderator'): ?>
-                                                <select class="status-select" onchange="updateStatus(<?php echo $hotel['hotel_id']; ?>, this.value)">
-                                                    <option value="Recommended" <?php if ($hotel['hotel_proposed'] === 'Recommended') echo 'selected'; ?>>توصیه‌شده</option>
-                                                    <option value="Not recommended" <?php if ($hotel['hotel_proposed'] === 'Not recommended') echo 'selected'; ?>>توصیه‌نشده</option>
-                                                </select>
+                                        <td data-label="شناسه"><?php echo htmlspecialchars($user['user_id']); ?></td>
+                                        <td data-label="نام کاربری"><?php echo htmlspecialchars($user['username']); ?></td>
+                                        <td data-label="نام"><?php echo htmlspecialchars($user['F-Name'] ?? '-'); ?></td>
+                                        <td data-label="نام خانوادگی"><?php echo htmlspecialchars($user['L-Name'] ?? '-'); ?></td>
+                                        <td data-label="ایمیل"><?php echo htmlspecialchars($user['email'] ?? '-'); ?></td>
+                                        <td data-label="تلفن"><?php echo htmlspecialchars($user['Phone'] ?? '-'); ?></td>
+                                        <td data-label="بالانس"><?php echo number_format($user['balance'] ?? 0); ?> تومان</td>
+                                        <td data-label="وضعیت تأیید">
+                                            <?php 
+                                            switch ($user['verification_status']) {
+                                                case 'Confirm': echo 'تأیید شده'; break;
+                                                case 'Rejected': echo 'رد شده'; break;
+                                                case 'Not Verified': echo 'در انتظار تأیید'; break;
+                                                default: echo '-';
+                                            }
+                                            ?>
+                                        </td>
+                                        <td data-label="ویدیو">
+                                            <?php if ($user['video_path']): ?>
+                                                <button class="btn-action text-blue-300 hover:text-blue-100" onclick="showVideo('<?php echo htmlspecialchars($user['video_path']); ?>')">نمایش</button>
                                             <?php else: ?>
-                                                <?php echo $hotel['hotel_proposed'] === 'Recommended' ? 'توصیه‌شده' : 'توصیه‌نشده'; ?>
+                                                -
                                             <?php endif; ?>
                                         </td>
+                                        <td data-label="نقش"><?php echo htmlspecialchars($user['role']); ?></td>
                                         <td data-label="عملیات">
                                             <?php if ($role === 'Moderator'): ?>
-                                                <a href="/site/admin/edit_hotel.php?id=<?php echo $hotel['hotel_id']; ?>" class="btn-action text-yellow-300 hover:text-yellow-100 mr-2"><i class="fas fa-edit"></i></a>
-                                                <a href="/site/admin/delete_hotel.php?id=<?php echo $hotel['hotel_id']; ?>" class="btn-action text-red-300 hover:text-red-100" onclick="return confirm('مطمئن هستید که می‌خواهید این هتل را حذف کنید؟');"><i class="fas fa-trash"></i></a>
+                                                <a href="/site/admin/edit_user.php?id=<?php echo $user['user_id']; ?>" class="btn-action text-yellow-300 hover:text-yellow-100 mr-2"><i class="fas fa-edit"></i></a>
                                             <?php endif; ?>
+                                            <a href="/site/admin/delete_user.php?id=<?php echo $user['user_id']; ?>" class="btn-action text-red-300 hover:text-red-100" onclick="return confirm('مطمئن هستید که می‌خواهید این کاربر را حذف کنید؟');"><i class="fas fa-trash"></i></a>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
-                                <?php if (empty($hotels)): ?>
+                                <?php if (empty($users)): ?>
                                     <tr>
-                                        <td colspan="10" class="text-center py-4">هتلی یافت نشد!</td>
+                                        <td colspan="11" class="text-center py-4">کاربری یافت نشد!</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -336,7 +364,34 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role ===
         </footer>
     </div>
 
+    <!-- پاپ‌آپ ویدیو -->
+    <div id="videoPopup" class="popup">
+        <div class="popup-content">
+            <button onclick="hideVideo()" class="text-red-400 hover:text-red-300 mb-2"><i class="fas fa-times"></i> بستن</button>
+            <video controls id="popupVideo">
+                <source id="videoSource" src="" type="video/mp4">
+                مرورگر شما از ویدیو پشتیبانی نمی‌کند.
+            </video>
+        </div>
+    </div>
+
     <script>
+        function showVideo(src) {
+            const popup = document.getElementById('videoPopup');
+            const videoSource = document.getElementById('videoSource');
+            const video = document.getElementById('popupVideo');
+            videoSource.src = src;
+            video.load();
+            popup.style.display = 'flex';
+        }
+
+        function hideVideo() {
+            const popup = document.getElementById('videoPopup');
+            const video = document.getElementById('popupVideo');
+            video.pause();
+            popup.style.display = 'none';
+        }
+
         const menuToggle = document.getElementById('menu-toggle');
         const sidebar = document.getElementById('sidebar');
         menuToggle.addEventListener('click', () => {
@@ -351,28 +406,6 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_status' && $role ===
         document.getElementById('refresh-btn').addEventListener('click', () => {
             location.reload();
         });
-
-        function updateStatus(hotelId, newStatus) {
-            fetch('/site/admin/hotels.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `action=update_status&hotel_id=${hotelId}&hotel_proposed=${newStatus}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('وضعیت با موفقیت تغییر کرد');
-                } else {
-                    alert('خطا در تغییر وضعیت: ' + (data.error || 'مشکل ناشناخته'));
-                }
-            })
-            .catch(error => {
-                console.error('خطا:', error);
-                alert('خطا در ارتباط با سرور');
-            });
-        }
     </script>
 </body>
 </html>
